@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: "0.15.0"
+
+      - name: Check formatting
+        run: zig fmt --check src/skir_client.zig build.zig
+
+      - name: Build (Debug)
+        run: zig build -Doptimize=Debug
+
+      - name: Run tests (Debug)
+        run: zig build test -Doptimize=Debug
+
+      - name: Run tests (ReleaseSafe)
+        run: zig build test -Doptimize=ReleaseSafe

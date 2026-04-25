@@ -1,0 +1,41 @@
+name: Deploy
+
+# Zig packages are distributed via GitHub releases. Consumers reference this
+# package by the tarball URL + hash in their build.zig.zon. No central registry
+# upload step is needed — creating the GitHub release IS the publish step.
+#
+# To publish a new version:
+#   1. Update .version in build.zig.zon
+#   2. Push a tag: git tag v<version> && git push origin v<version>
+#   3. This workflow creates the GitHub Release automatically, which makes the
+#      package available for consumers via:
+#        zig fetch --save https://github.com/gepheum/skir/archive/refs/tags/v<version>.tar.gz
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: "0.15.0"
+
+      - name: Run tests
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
