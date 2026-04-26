@@ -1153,14 +1153,7 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
         }
 
         pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
-            const key_extractor_name = comptime blk: {
-                if (@hasDecl(Spec, "keyExtractor")) {
-                    const decl_ty = @TypeOf(Spec.keyExtractor);
-                    if (decl_ty == []const u8) break :blk Spec.keyExtractor;
-                    if (@typeInfo(decl_ty) == .@"fn") break :blk Spec.keyExtractor();
-                }
-                break :blk "";
-            };
+            const key_extractor_name = Spec.key_extractor;
             const S = struct {
                 var desc: TypeDescriptor = undefined;
                 fn initOnce() void {
@@ -1897,15 +1890,9 @@ const TestIntKeyedSpec = struct {
         return v;
     }
 
-    var fallback: i32 = -1;
+    pub const default_value: i32 = -1;
 
-    pub fn defaultValue() *i32 {
-        return &fallback;
-    }
-
-    pub fn keyExtractor() []const u8 {
-        return "self";
-    }
+    pub const key_extractor: []const u8 = "self";
 };
 
 test "keyedArraySerializer: serialize dense nonempty" {

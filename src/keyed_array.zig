@@ -8,8 +8,9 @@ const std = @import("std");
 /// - `Value`: the element type,
 /// - `Key`: the key type (must be hashable by `std.AutoHashMap`),
 /// - `fn getGet(Value) Key`: extracts the key from an element,
-/// - `fn defaultValue() *Value`: returns a pointer to a sentinel value used
-///   by `findByKeyOrDefault` when no match is found.
+/// - `const default_value: Value`: a sentinel value used by
+///   `findByKeyOrDefault` when no match is found,
+/// - `const key_extractor: []const u8`: dot-separated path to the key field.
 pub fn KeyedArray(comptime Spec: type) type {
     const T = Spec.Value;
     const K = Spec.Key;
@@ -50,6 +51,10 @@ pub fn KeyedArray(comptime Spec: type) type {
         /// Frees the internal key index if it has been built.
         ///
         /// Does **not** free `values`; the caller retains that responsibility.
+        ///
+        /// If this `KeyedArray` was obtained by deserializing a Skir value, you
+        /// do not need to call this: the key index will be freed together with
+        /// the arena when the arena is released.
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -86,11 +91,11 @@ pub fn KeyedArray(comptime Spec: type) type {
             return self.key_index.?.get(key);
         }
 
-        /// Returns a pointer to the element whose key equals `key`, or the
-        /// sentinel value from `Spec.defaultValue()` if no match is found.
-        pub fn findByKeyOrDefault(self: *Self, key: K) !*T {
+        /// Returns a pointer to the element whose key equals `key`, or
+        /// `&Spec.default_value` if no match is found.
+        pub fn findByKeyOrDefault(self: *Self, key: K) !*const T {
             if (try self.findByKey(key)) |value| return value;
-            return Spec.defaultValue();
+            return &Spec.default_value;
         }
     };
 }
@@ -109,11 +114,7 @@ test "KeyedArray indexes lazily and returns defaults" {
             return entry.id;
         }
 
-        var fallback: Entry = .{ .id = -1, .value = 0 };
-
-        pub fn defaultValue() *Entry {
-            return &fallback;
-        }
+        pub const default_value: Entry = .{ .id = -1, .value = 0 };
     };
 
     var values = [_]Entry{
@@ -130,9 +131,9 @@ test "KeyedArray indexes lazily and returns defaults" {
     const missing = try keyed.findByKey(99);
     try std.testing.expect(missing == null);
 
-    const fallback = try keyed.findByKeyOrDefault(42);
-    try std.testing.expectEqual(@as(i32, -1), fallback.id);
-    try std.testing.expectEqual(@as(i32, 0), fallback.value);
+    const default = try keyed.findByKeyOrDefault(42);
+    try std.testing.expectEqual(@as(i32, -1), default.id);
+    try std.testing.expectEqual(@as(i32, 0), default.value);
 }
 
 test "KeyedArray empty creates an empty container" {
@@ -148,11 +149,7 @@ test "KeyedArray empty creates an empty container" {
             return entry.id;
         }
 
-        var fallback: Entry = .{ .id = -1 };
-
-        pub fn defaultValue() *Entry {
-            return &fallback;
-        }
+        pub const default_value: Entry = .{ .id = -1 };
     };
 
     const keyed = KeyedArray(EntrySpec).empty();
