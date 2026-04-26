@@ -32,16 +32,40 @@ jobs:
         run: |
           set -euo pipefail
           ZIG_VERSION="0.15.0"
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64|aarch64) ;;
+          MACHINE_ARCH="$(uname -m)"
+          case "$MACHINE_ARCH" in
+            x86_64)
+              TARGET="x86_64-linux"
+              ;;
+            aarch64)
+              TARGET="aarch64-linux"
+              ;;
             *)
-              echo "Unsupported architecture: $ARCH" >&2
+              echo "Unsupported architecture: $MACHINE_ARCH" >&2
               exit 1
               ;;
           esac
-          ZIG_DIR="$RUNNER_TEMP/zig-$ZIG_VERSION-$ARCH"
-          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz" -o "$RUNNER_TEMP/zig.tar.xz"
+
+          ZIG_URL="$(curl -fsSL "https://ziglang.org/download/index.json" | python3 - "$ZIG_VERSION" "$TARGET" <<'PY'
+import json
+import sys
+
+version = sys.argv[1]
+target = sys.argv[2]
+data = json.load(sys.stdin)
+
+if version in data and target in data[version]:
+    print(data[version][target]["tarball"])
+elif "master" in data and target in data["master"]:
+    print(data["master"][target]["tarball"])
+else:
+    sys.exit(f"No Zig binary found for target {target}")
+PY
+)"
+
+          echo "Installing Zig from: $ZIG_URL"
+          ZIG_DIR="$RUNNER_TEMP/zig-$TARGET"
+          curl -fsSL "$ZIG_URL" -o "$RUNNER_TEMP/zig.tar.xz"
           mkdir -p "$ZIG_DIR"
           tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$ZIG_DIR" --strip-components=1
           echo "$ZIG_DIR" >> "$GITHUB_PATH"
