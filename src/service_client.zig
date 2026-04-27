@@ -113,7 +113,6 @@ pub const ServiceClient = opaque {
     /// defer client.deinit();
     ///
     /// _ = try client.addHeader("Authorization", "Bearer <token>");
-
     /// var rpc_arena = std.heap.ArenaAllocator.init(allocator);
     /// defer rpc_arena.deinit();
     /// const rpc_allocator = rpc_arena.allocator();
