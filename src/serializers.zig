@@ -49,6 +49,10 @@ const BoolAdapter = struct {
         return !input;
     }
 
+    pub fn clone(_: Self, _: std.mem.Allocator, input: bool) anyerror!bool {
+        return input;
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: bool, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         if (eol_indent != null) {
             try out.appendSlice(allocator, if (input) "true" else "false");
@@ -122,6 +126,10 @@ const Int32Adapter = struct {
         return input == 0;
     }
 
+    pub fn clone(_: Self, _: std.mem.Allocator, input: i32) anyerror!i32 {
+        return input;
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: i32, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         var buf: [64]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, "{d}", .{input}) catch unreachable;
@@ -178,6 +186,10 @@ const Int64Adapter = struct {
         return input == 0;
     }
 
+    pub fn clone(_: Self, _: std.mem.Allocator, input: i64) anyerror!i64 {
+        return input;
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: i64, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         var buf: [64]u8 = undefined;
         if (input >= -max_safe_int64_json and input <= max_safe_int64_json) {
@@ -232,6 +244,10 @@ const Hash64Adapter = struct {
 
     pub fn isDefault(_: Self, input: u64) bool {
         return input == 0;
+    }
+
+    pub fn clone(_: Self, _: std.mem.Allocator, input: u64) anyerror!u64 {
+        return input;
     }
 
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: u64, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -354,6 +370,10 @@ const TimestampAdapter = struct {
         return input.unix_millis == 0;
     }
 
+    pub fn clone(_: Self, _: std.mem.Allocator, input: Timestamp) anyerror!Timestamp {
+        return input;
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: Timestamp, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         const ms = input.unix_millis;
         if (eol_indent) |eol| {
@@ -454,6 +474,10 @@ const Float32Adapter = struct {
         return input == 0.0;
     }
 
+    pub fn clone(_: Self, _: std.mem.Allocator, input: f32) anyerror!f32 {
+        return input;
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: f32, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         if (std.math.isInf(input) or std.math.isNan(input)) {
             try out.append(allocator, '"');
@@ -513,6 +537,10 @@ const Float64Adapter = struct {
 
     pub fn isDefault(_: Self, input: f64) bool {
         return input == 0.0;
+    }
+
+    pub fn clone(_: Self, _: std.mem.Allocator, input: f64) anyerror!f64 {
+        return input;
     }
 
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: f64, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -607,6 +635,10 @@ const StringAdapter = struct {
 
     pub fn isDefault(_: Self, input: []const u8) bool {
         return input.len == 0;
+    }
+
+    pub fn clone(_: Self, allocator: std.mem.Allocator, input: []const u8) anyerror![]const u8 {
+        return allocator.dupe(u8, input);
     }
 
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: []const u8, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -783,6 +815,10 @@ const BytesAdapter = struct {
         return input.len == 0;
     }
 
+    pub fn clone(_: Self, allocator: std.mem.Allocator, input: []const u8) anyerror![]const u8 {
+        return allocator.dupe(u8, input);
+    }
+
     pub fn toJson(_: Self, allocator: std.mem.Allocator, input: []const u8, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
         try out.append(allocator, '"');
         if (eol_indent != null) {
@@ -853,6 +889,13 @@ pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Va
             return value == null;
         }
 
+        pub fn clone(_: @This(), alloc: std.mem.Allocator, value: ?T) anyerror!?T {
+            if (value) |v| {
+                return try ivt.cloneFn(alloc, v);
+            }
+            return null;
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: ?T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             if (value) |v| {
                 try ivt.toJsonFn(alloc, v, eol, out);
@@ -910,6 +953,18 @@ pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Seri
             };
         }
 
+        pub fn clone(_: @This(), alloc: std.mem.Allocator, value: Recursive) anyerror!Recursive {
+            return switch (value) {
+                .default_value => .default_value,
+                .value => |p| blk: {
+                    const v = try ivt.cloneFn(alloc, p.*);
+                    const copy = try alloc.create(T);
+                    copy.* = v;
+                    break :blk .{ .value = copy };
+                },
+            };
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: Recursive, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             switch (value) {
                 .default_value => try ivt.toJsonFn(alloc, T.default, eol, out),
@@ -959,6 +1014,13 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
             return ivt.isDefaultFn(value.*);
         }
 
+        pub fn clone(_: @This(), alloc: std.mem.Allocator, value: *const T) anyerror!*const T {
+            const v = try ivt.cloneFn(alloc, value.*);
+            const p = try alloc.create(T);
+            p.* = v;
+            return p;
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: *const T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             try ivt.toJsonFn(alloc, value.*, eol, out);
         }
@@ -1001,6 +1063,15 @@ pub fn arraySerializer(comptime inner: anytype) Serializer([]const @TypeOf(inner
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: []const T) bool {
             return value.len == 0;
+        }
+
+        pub fn clone(_: @This(), alloc: std.mem.Allocator, value: []const T) anyerror![]const T {
+            const items = try alloc.alloc(T, value.len);
+            errdefer alloc.free(items);
+            for (value, 0..) |item, i| {
+                items[i] = try ivt.cloneFn(alloc, item);
+            }
+            return items;
         }
 
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: []const T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -1088,6 +1159,15 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: KArr) bool {
             return value.values.len == 0;
+        }
+
+        pub fn clone(_: @This(), alloc: std.mem.Allocator, value: KArr) anyerror!KArr {
+            const items = try alloc.alloc(Value, value.values.len);
+            errdefer alloc.free(items);
+            for (value.values, 0..) |item, i| {
+                items[i] = try ivt.cloneFn(alloc, item);
+            }
+            return KArr.init(alloc, items);
         }
 
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: KArr, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {

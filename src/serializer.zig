@@ -22,6 +22,7 @@ pub const SerializeFormat = enum {
 pub fn _SerializerVTable(comptime T: type) type {
     return struct {
         isDefaultFn: *const fn (T) bool,
+        cloneFn: *const fn (std.mem.Allocator, T) anyerror!T,
         toJsonFn: *const fn (std.mem.Allocator, T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
         fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
         encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
@@ -54,6 +55,11 @@ pub fn Serializer(comptime T: type) type {
                     return impl.typeDescriptor();
                 }
 
+                fn doClone(alloc: std.mem.Allocator, value: T) anyerror!T {
+                    const impl: Impl = .{};
+                    return impl.clone(alloc, value);
+                }
+
                 fn doToJson(alloc: std.mem.Allocator, value: T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
                     const impl: Impl = .{};
                     return impl.toJson(alloc, value, eol, out);
@@ -76,6 +82,7 @@ pub fn Serializer(comptime T: type) type {
 
                 const vt: VTable = .{
                     .isDefaultFn = doIsDefault,
+                    .cloneFn = doClone,
                     .toJsonFn = doToJson,
                     .fromJsonFn = doFromJson,
                     .encodeFn = doEncode,
@@ -90,6 +97,9 @@ pub fn Serializer(comptime T: type) type {
         const StubImpl = struct {
             pub fn isDefault(_: @This(), _: T) bool {
                 return false;
+            }
+            pub fn clone(_: @This(), _: std.mem.Allocator, _: T) anyerror!T {
+                return error.Stub;
             }
             pub fn toJson(_: @This(), _: std.mem.Allocator, _: T, _: ?[]const u8, _: *std.ArrayList(u8)) anyerror!void {}
             pub fn fromJson(_: @This(), _: std.mem.Allocator, _: std.json.Value, _: bool) anyerror!T {
@@ -148,6 +158,11 @@ pub fn Serializer(comptime T: type) type {
                 defer parsed.deinit();
                 return self._vtable.fromJsonFn(allocator, parsed.value, opts.keepUnrecognizedValues);
             }
+        }
+
+        /// Clones `value` into memory owned by `allocator`.
+        pub fn clone(self: Self, allocator: std.mem.Allocator, value: T) !T {
+            return self._vtable.cloneFn(allocator, value);
         }
 
         /// Returns a runtime `TypeDescriptor` describing the shape of `T`.

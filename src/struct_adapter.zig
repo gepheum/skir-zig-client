@@ -23,6 +23,7 @@ pub fn StructAdapter(comptime T: type) type {
             doc: []const u8,
             ctx: *anyopaque,
             is_default_fn: *const fn (*const anyopaque, *const T) bool,
+            clone_into_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, *const T) anyerror!void,
             to_json_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
             set_from_json_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, std.json.Value, bool) anyerror!void,
             encode_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
@@ -94,6 +95,12 @@ pub fn StructAdapter(comptime T: type) type {
                     return ctx.ser._vtable.toJsonFn(alloc, ctx.getter(value), eol_indent, out);
                 }
 
+                fn cloneInto(ctx_ptr: *const anyopaque, alloc: std.mem.Allocator, out_value: *T, in_value: *const T) anyerror!void {
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
+                    const v = try ctx.ser._vtable.cloneFn(alloc, ctx.getter(in_value));
+                    ctx.setter(out_value, v);
+                }
+
                 fn setFromJson(ctx_ptr: *const anyopaque, alloc: std.mem.Allocator, value: *T, json: std.json.Value, keep_unrecognized: bool) anyerror!void {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
                     const v = try ctx.ser._vtable.fromJsonFn(alloc, json, keep_unrecognized);
@@ -125,6 +132,7 @@ pub fn StructAdapter(comptime T: type) type {
                 .doc = try self.allocator.dupe(u8, doc),
                 .ctx = ctx,
                 .is_default_fn = Ops.isDefault,
+                .clone_into_fn = Ops.cloneInto,
                 .to_json_fn = Ops.toJson,
                 .set_from_json_fn = Ops.setFromJson,
                 .encode_fn = Ops.encode,
@@ -588,6 +596,19 @@ pub fn StructAdapter(comptime T: type) type {
             return t;
         }
 
+        pub fn clone(self: *const Self, allocator: std.mem.Allocator, input: *const T) anyerror!T {
+            var out = T.default;
+            for (self.ordered_entries.items) |entry| {
+                try entry.clone_into_fn(entry.ctx, allocator, &out, input);
+            }
+
+            if (self.get_unrecognized(input)) |u| {
+                self.set_unrecognized(&out, try u.clone(allocator));
+            }
+
+            return out;
+        }
+
         pub fn typeDescriptor(self: *const Self) *const td.TypeDescriptor {
             return &self.descriptor;
         }
@@ -621,6 +642,10 @@ pub fn _structSerializerFromStatic(comptime T: type, comptime get_adapter: *cons
 
         pub fn decode(_: @This(), allocator: std.mem.Allocator, input: *[]const u8, keep_unrecognized: bool) anyerror!T {
             return get_adapter().decode(allocator, input, keep_unrecognized);
+        }
+
+        pub fn clone(_: @This(), allocator: std.mem.Allocator, input: T) anyerror!T {
+            return get_adapter().clone(allocator, &input);
         }
 
         pub fn typeDescriptor(_: @This()) *const td.TypeDescriptor {

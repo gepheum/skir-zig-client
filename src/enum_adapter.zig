@@ -31,6 +31,7 @@ pub fn EnumAdapter(comptime T: type) type {
             ctx: *anyopaque,
             is_constant_fn: *const fn (*const anyopaque) bool,
             constant_fn: *const fn (*const anyopaque) T,
+            clone_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T) anyerror!T,
             to_json_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
             wrap_from_json_fn: *const fn (*const anyopaque, std.mem.Allocator, std.json.Value, bool) anyerror!T,
             encode_value_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
@@ -123,6 +124,11 @@ pub fn EnumAdapter(comptime T: type) type {
                     }
                 }
 
+                fn clone(ctx_ptr: *const anyopaque, _: std.mem.Allocator, _: *const T) anyerror!T {
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
+                    return ctx.instance;
+                }
+
                 fn wrapFromJson(_: *const anyopaque, _: std.mem.Allocator, _: std.json.Value, _: bool) anyerror!T {
                     return error.ExpectedConstantVariant;
                 }
@@ -153,6 +159,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 .ctx = ctx,
                 .is_constant_fn = Ops.isConstant,
                 .constant_fn = Ops.constant,
+                .clone_fn = Ops.clone,
                 .to_json_fn = Ops.toJson,
                 .wrap_from_json_fn = Ops.wrapFromJson,
                 .encode_value_fn = Ops.encodeValue,
@@ -232,6 +239,12 @@ pub fn EnumAdapter(comptime T: type) type {
                     }
                 }
 
+                fn clone(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, input: *const T) anyerror!T {
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
+                    const inner = try ctx.ser._vtable.cloneFn(allocator, ctx.get_value(input));
+                    return ctx.wrap(inner);
+                }
+
                 fn wrapFromJson(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
                     const inner = try ctx.ser._vtable.fromJsonFn(allocator, json, keep_unrecognized);
@@ -273,6 +286,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 .ctx = ctx,
                 .is_constant_fn = Ops.isConstant,
                 .constant_fn = Ops.constant,
+                .clone_fn = Ops.clone,
                 .to_json_fn = Ops.toJson,
                 .wrap_from_json_fn = Ops.wrapFromJson,
                 .encode_value_fn = Ops.encodeValue,
@@ -755,6 +769,25 @@ pub fn EnumAdapter(comptime T: type) type {
             return T.unknown;
         }
 
+        pub fn clone(self: *const Self, allocator: std.mem.Allocator, input: *const T) anyerror!T {
+            const ko = self.get_kind_ordinal(input);
+            if (ko == 0) {
+                if (self.get_unrecognized(input)) |u| {
+                    return self.wrap_unrecognized(try u.clone(allocator));
+                } else {
+                    return T.unknown;
+                }
+            }
+
+            if (ko < self.kind_ordinal_to_entry.items.len) {
+                if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                    return entry.clone_fn(entry.ctx, allocator, input);
+                }
+            }
+
+            return T.unknown;
+        }
+
         pub fn typeDescriptor(self: *const Self) *const td.TypeDescriptor {
             return &self.descriptor;
         }
@@ -788,6 +821,10 @@ pub fn _enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const 
 
         pub fn decode(_: @This(), allocator: std.mem.Allocator, input: *[]const u8, keep_unrecognized: bool) anyerror!T {
             return get_adapter().decode(allocator, input, keep_unrecognized);
+        }
+
+        pub fn clone(_: @This(), allocator: std.mem.Allocator, input: T) anyerror!T {
+            return get_adapter().clone(allocator, &input);
         }
 
         pub fn typeDescriptor(_: @This()) *const td.TypeDescriptor {
