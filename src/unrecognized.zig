@@ -116,7 +116,7 @@ test "UnrecognizedFields.clone deep copies all tails" {
 
     const wire_tail = try alloc.alloc([]const u8, 2);
     wire_tail[0] = try alloc.dupe(u8, &[_]u8{ 0xF3, 0x03, 'a', 'b', 'c' });
-    wire_tail[1] = try alloc.dupe(u8, &[_]u8{ 0x01 });
+    wire_tail[1] = try alloc.dupe(u8, &[_]u8{0x01});
 
     const original: UnrecognizedFields(Dummy) = .{
         .dense_tail_json = json_tail,
