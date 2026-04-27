@@ -103,14 +103,23 @@ pub const ServiceClient = opaque {
     /// - non-2xx HTTP responses become `RpcError` with the server status code;
     /// - transport/client failures use `status_code = 0`.
     ///
+    /// All response allocations (success payload and error message) are made
+    /// with `allocator`. Pass a per-call arena allocator when you want to
+    /// release everything for an invocation in one `arena.deinit()`.
+    ///
     /// Example:
     /// ```zig
     /// const client = try skir_client.ServiceClient.init(allocator, "http://127.0.0.1:18787/myapi");
     /// defer client.deinit();
     ///
     /// _ = try client.addHeader("Authorization", "Bearer <token>");
+
+    /// var rpc_arena = std.heap.ArenaAllocator.init(allocator);
+    /// defer rpc_arena.deinit();
+    /// const rpc_allocator = rpc_arena.allocator();
     ///
     /// const result = try client.invokeRemote(
+    ///     rpc_allocator,
     ///     GetUserRequest,
     ///     GetUserResponse,
     ///     &service_mod.get_user_method(),
@@ -119,40 +128,41 @@ pub const ServiceClient = opaque {
     /// ```
     pub fn invokeRemote(
         self: *const ServiceClient,
+        allocator: std.mem.Allocator,
         comptime Req: type,
         comptime Resp: type,
         method: *const Method(Req, Resp),
         request: *const Req,
     ) !RpcResult(Resp) {
         const i = self.constImpl();
-        const request_json = method.request_serializer.serialize(i.allocator, request.*, .{ .format = .denseJson }) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
+        const request_json = method.request_serializer.serialize(allocator, request.*, .{ .format = .denseJson }) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
         };
-        defer i.allocator.free(request_json);
+        defer allocator.free(request_json);
 
-        const wire_body = try std.fmt.allocPrint(i.allocator, "{s}:{d}::{s}", .{ method.name, method.number, request_json });
-        defer i.allocator.free(wire_body);
+        const wire_body = try std.fmt.allocPrint(allocator, "{s}:{d}::{s}", .{ method.name, method.number, request_json });
+        defer allocator.free(wire_body);
 
         const parsed = parseServiceUrl(i.service_url) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
         };
 
-        const response = doHttpPost(i.allocator, parsed, wire_body, i.headers.items) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "{s}", .{@errorName(err)}) } };
+        const response = doHttpPost(allocator, parsed, wire_body, i.headers.items) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)}) } };
         };
-        defer i.allocator.free(response.content_type);
-        defer i.allocator.free(response.body);
+        defer allocator.free(response.content_type);
+        defer allocator.free(response.body);
 
         if (response.status_code < 200 or response.status_code >= 300) {
             const msg = if (std.mem.indexOf(u8, response.content_type, "text/plain") != null)
-                try i.allocator.dupe(u8, response.body)
+                try allocator.dupe(u8, response.body)
             else
-                try i.allocator.dupe(u8, "");
+                try allocator.dupe(u8, "");
             return RpcResult(Resp){ .err = .{ .status_code = response.status_code, .message = msg } };
         }
 
-        const value = method.response_serializer.deserialize(i.allocator, response.body, .{ .keepUnrecognizedValues = true }) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "failed to decode response: {s}", .{@errorName(err)}) } };
+        const value = method.response_serializer.deserialize(allocator, response.body, .{ .keepUnrecognizedValues = true }) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "failed to decode response: {s}", .{@errorName(err)}) } };
         };
 
         return RpcResult(Resp){ .ok = value };
