@@ -240,7 +240,8 @@ fn doHttpPost(
     try stream.writeAll(content_len_line);
     try stream.writeAll("Connection: close\r\n");
     for (headers) |h| {
-        const header_line = try std.fmt.bufPrint(&line_buf, "{s}: {s}\r\n", .{ h.key, h.value });
+        const header_line = try std.fmt.allocPrint(allocator, "{s}: {s}\r\n", .{ h.key, h.value });
+        defer allocator.free(header_line);
         try stream.writeAll(header_line);
     }
     try stream.writeAll("\r\n");
