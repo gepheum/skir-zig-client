@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIG_VERSION="0.15.0"
+          ZIG_VERSION="0.15.2"
           MACHINE_ARCH="$(uname -m)"
           case "$MACHINE_ARCH" in
             x86_64)
