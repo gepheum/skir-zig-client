@@ -287,6 +287,9 @@ pub fn Service(comptime Meta: type) type {
 
         /// Registers one method implementation.
         ///
+        /// `method` must be a `skir_client.Method(Req, Resp)` value, typically
+        /// returned by a generated method accessor.
+        ///
         /// `impl_fn` receives three arguments:
         /// - the allocator for request-scoped allocations,
         /// - the deserialized request value,
@@ -840,14 +843,20 @@ fn apiGuardImpl(_: std.mem.Allocator, req: i32, _: void) MethodResult(i32) {
     return .{ .ok = req };
 }
 
-fn compileGuardAddMethod(svc: *Service(void)) void {
+fn compileGuardAddMethod() void {
     const M = Method(i32, i32);
     const method: M = undefined;
-    _ = svc.addMethod(method, apiGuardImpl) catch unreachable;
+    // Verify that Req/Resp aliases work and impl_fn type is correctly inferred.
+    _ = @as(
+        *const fn (std.mem.Allocator, @TypeOf(method).Req, void) MethodResult(@TypeOf(method).Resp),
+        apiGuardImpl,
+    );
+    // Verify addMethod is present on Service.
+    if (!@hasDecl(Service(void), "addMethod")) @compileError("Service.addMethod is missing");
 }
 
 test "Service API addMethod compile guard" {
     comptime {
-        _ = compileGuardAddMethod;
+        compileGuardAddMethod();
     }
 }

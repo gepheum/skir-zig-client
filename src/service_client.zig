@@ -30,15 +30,6 @@ pub fn RpcResult(comptime T: type) type {
     };
 }
 
-/// Options for a single `invokeRemote` call.
-pub const InvokeOptions = struct {
-    /// Timeout in milliseconds applied to TCP send/receive operations.
-    /// This is not a full end-to-end request timeout: connect/DNS latency is
-    /// outside this limit.
-    /// `null` means no timeout (the default).
-    timeout_ms: ?u32 = null,
-};
-
 const ServiceClientImpl = struct {
     allocator: std.mem.Allocator,
     service_url: []const u8,
@@ -94,6 +85,8 @@ pub const ServiceClient = opaque {
     /// Can be chained while setting up the client.
     pub fn addHeader(self: *ServiceClient, key: []const u8, value: []const u8) !*ServiceClient {
         const i = self.impl();
+        if (std.mem.indexOfAny(u8, key, "\r\n") != null) return error.InvalidHeaderName;
+        if (std.mem.indexOfAny(u8, value, "\r\n") != null) return error.InvalidHeaderValue;
         try i.headers.append(i.allocator, .{
             .key = try i.allocator.dupe(u8, key),
             .value = try i.allocator.dupe(u8, value),
@@ -103,6 +96,9 @@ pub const ServiceClient = opaque {
 
     /// Invokes a remote method and returns either a decoded response or
     /// `RpcError`.
+    ///
+    /// `method` must be a `skir_client.Method(Req, Resp)` value, typically
+    /// returned by a generated method accessor.
     ///
     /// The request is serialized using dense JSON. Successful responses are
     /// deserialized while keeping unrecognized values so the client can talk to
@@ -138,7 +134,6 @@ pub const ServiceClient = opaque {
         allocator: std.mem.Allocator,
         method: anytype,
         request: @TypeOf(method).Req,
-        options: InvokeOptions,
     ) !RpcResult(@TypeOf(method).Resp) {
         const Resp = @TypeOf(method).Resp;
         const i = self.constImpl();
@@ -163,7 +158,6 @@ pub const ServiceClient = opaque {
             parsed,
             wire_body,
             i.headers.items,
-            options.timeout_ms,
         ) catch |err| {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)}) } };
         };
@@ -232,20 +226,9 @@ fn doHttpPost(
     parsed: ParsedServiceUrl,
     body: []const u8,
     headers: []const Header,
-    timeout_ms: ?u32,
 ) !HttpResponse {
     const stream = try std.net.tcpConnectToHost(allocator, parsed.host, parsed.port);
     defer stream.close();
-
-    if (timeout_ms) |ms| {
-        const tv = std.posix.timeval{
-            .tv_sec = @intCast(ms / 1000),
-            .tv_usec = @intCast((ms % 1000) * 1000),
-        };
-        const opt = std.mem.asBytes(&tv);
-        try std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, opt);
-        try std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, opt);
-    }
 
     var line_buf: [256]u8 = undefined;
     const request_line = try std.fmt.bufPrint(&line_buf, "POST {s} HTTP/1.1\r\n", .{parsed.path});
@@ -311,18 +294,23 @@ fn headerValue(allocator: std.mem.Allocator, headers_block: []const u8, key_lowe
     return allocator.dupe(u8, "");
 }
 
-fn compileGuardInvokeRemote(client: *const ServiceClient, allocator: std.mem.Allocator) void {
+fn compileGuardInvokeRemote() void {
     const M = Method(i32, i32);
     const method: M = undefined;
     const request: M.Req = 123;
-    const ret = @TypeOf(client.invokeRemote(allocator, M, method, request, .{}));
-    if (ret != !RpcResult(M.Resp)) {
+    const client: *const ServiceClient = undefined;
+    const allocator: std.mem.Allocator = undefined;
+    const ret = @TypeOf(client.invokeRemote(allocator, method, request));
+    // ret is an error union; check only the payload type (the error set is inferred).
+    const info = @typeInfo(ret);
+    if (info != .error_union) @compileError("ServiceClient.invokeRemote must return an error union");
+    if (info.error_union.payload != RpcResult(M.Resp)) {
         @compileError("ServiceClient.invokeRemote signature changed");
     }
 }
 
 test "ServiceClient API invokeRemote compile guard" {
     comptime {
-        _ = compileGuardInvokeRemote;
+        compileGuardInvokeRemote();
     }
 }

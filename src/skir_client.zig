@@ -43,7 +43,6 @@ pub const timestampSerializer = serializers.timestampSerializer;
 
 // RPC service/runtime
 pub const HttpErrorCode = service.HttpErrorCode;
-pub const InvokeOptions = service_client.InvokeOptions;
 pub const MethodResult = service.MethodResult;
 pub const RawResponse = service.RawResponse;
 pub const RpcError = service_client.RpcError;
@@ -72,3 +71,9 @@ pub const _StructAdapter = struct_adapter.StructAdapter;
 pub const _SerializerVTable = core._SerializerVTable;
 pub const _serializerFromAdapter = core._serializerFromAdapter;
 pub const _structSerializerFromStatic = struct_adapter._structSerializerFromStatic;
+
+// Include tests from service modules so `zig build test` discovers them.
+test {
+    _ = @import("service.zig");
+    _ = @import("service_client.zig");
+}
