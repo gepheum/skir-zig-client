@@ -312,15 +312,25 @@ pub fn Service(comptime Meta: type) type {
                 return error.DuplicateMethodNumber;
             }
 
+            // Perform all fallible allocations before touching the maps so
+            // that a failure leaves the service in a consistent state.
             const req_td = method.request_serializer.typeDescriptor();
             const req_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, req_td);
+            errdefer self.allocator.free(req_td_json);
             const resp_td = method.response_serializer.typeDescriptor();
             const resp_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, resp_td);
+            errdefer self.allocator.free(resp_td_json);
+            const name_copy = try self.allocator.dupe(u8, method.name);
+            errdefer self.allocator.free(name_copy);
+            const doc_copy = try self.allocator.dupe(u8, method.doc);
+            errdefer self.allocator.free(doc_copy);
+            const by_name_key = try self.allocator.dupe(u8, method.name);
+            errdefer self.allocator.free(by_name_key);
 
             const entry: Entry = .{
-                .name = try self.allocator.dupe(u8, method.name),
+                .name = name_copy,
                 .number = number,
-                .doc = try self.allocator.dupe(u8, method.doc),
+                .doc = doc_copy,
                 .request_type_descriptor_json = req_td_json,
                 .response_type_descriptor_json = resp_td_json,
                 .invoke_fn = struct {
@@ -346,8 +356,13 @@ pub fn Service(comptime Meta: type) type {
                 }.invoke,
             };
 
-            try self.by_name.put(try self.allocator.dupe(u8, method.name), number);
-            try self.by_num.put(number, entry);
+            // Both map inserts must succeed before we commit. If by_num.put
+            // fails the by_name entry is removed so no dangling reference exists.
+            try self.by_name.put(by_name_key, number);
+            self.by_num.put(number, entry) catch |err| {
+                _ = self.by_name.remove(by_name_key);
+                return err;
+            };
             return self;
         }
 
