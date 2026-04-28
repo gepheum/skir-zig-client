@@ -30,6 +30,15 @@ pub fn RpcResult(comptime T: type) type {
     };
 }
 
+/// Options for a single `invokeRemote` call.
+pub const InvokeOptions = struct {
+    /// Timeout in milliseconds applied to TCP send/receive operations.
+    /// This is not a full end-to-end request timeout: connect/DNS latency is
+    /// outside this limit.
+    /// `null` means no timeout (the default).
+    timeout_ms: ?u32 = null,
+};
+
 const ServiceClientImpl = struct {
     allocator: std.mem.Allocator,
     service_url: []const u8,
@@ -119,22 +128,25 @@ pub const ServiceClient = opaque {
     ///
     /// const result = try client.invokeRemote(
     ///     rpc_allocator,
-    ///     GetUserRequest,
-    ///     GetUserResponse,
-    ///     &service_mod.get_user_method(),
-    ///     &.{ .user_id = 42, ._unrecognized = null },
+    ///     service_mod.get_user_method(),
+    ///     .{ .user_id = 42, ._unrecognized = null },
+    ///     .{ .timeout_ms = 5000 },
     /// );
     /// ```
     pub fn invokeRemote(
         self: *const ServiceClient,
         allocator: std.mem.Allocator,
-        comptime Req: type,
-        comptime Resp: type,
-        method: *const Method(Req, Resp),
-        request: *const Req,
-    ) !RpcResult(Resp) {
+        method: anytype,
+        request: @TypeOf(method).Req,
+        options: InvokeOptions,
+    ) !RpcResult(@TypeOf(method).Resp) {
+        const Resp = @TypeOf(method).Resp;
         const i = self.constImpl();
-        const request_json = method.request_serializer.serialize(allocator, request.*, .{ .format = .denseJson }) catch |err| {
+        const request_json = method.request_serializer.serialize(
+            allocator,
+            request,
+            .{ .format = .denseJson },
+        ) catch |err| {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
         };
         defer allocator.free(request_json);
@@ -146,7 +158,13 @@ pub const ServiceClient = opaque {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
         };
 
-        const response = doHttpPost(allocator, parsed, wire_body, i.headers.items) catch |err| {
+        const response = doHttpPost(
+            allocator,
+            parsed,
+            wire_body,
+            i.headers.items,
+            options.timeout_ms,
+        ) catch |err| {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)}) } };
         };
         defer allocator.free(response.content_type);
@@ -157,11 +175,19 @@ pub const ServiceClient = opaque {
                 try allocator.dupe(u8, response.body)
             else
                 try allocator.dupe(u8, "");
-            return RpcResult(Resp){ .err = .{ .status_code = response.status_code, .message = msg } };
+            return RpcResult(Resp){
+                .err = .{ .status_code = response.status_code, .message = msg },
+            };
         }
 
         const value = method.response_serializer.deserialize(allocator, response.body, .{ .keepUnrecognizedValues = true }) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(allocator, "failed to decode response: {s}", .{@errorName(err)}) } };
+            return RpcResult(Resp){
+                .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(
+                    allocator,
+                    "failed to decode response: {s}",
+                    .{@errorName(err)},
+                ) },
+            };
         };
 
         return RpcResult(Resp){ .ok = value };
@@ -206,9 +232,20 @@ fn doHttpPost(
     parsed: ParsedServiceUrl,
     body: []const u8,
     headers: []const Header,
+    timeout_ms: ?u32,
 ) !HttpResponse {
     const stream = try std.net.tcpConnectToHost(allocator, parsed.host, parsed.port);
     defer stream.close();
+
+    if (timeout_ms) |ms| {
+        const tv = std.posix.timeval{
+            .tv_sec = @intCast(ms / 1000),
+            .tv_usec = @intCast((ms % 1000) * 1000),
+        };
+        const opt = std.mem.asBytes(&tv);
+        try std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, opt);
+        try std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, opt);
+    }
 
     var line_buf: [256]u8 = undefined;
     const request_line = try std.fmt.bufPrint(&line_buf, "POST {s} HTTP/1.1\r\n", .{parsed.path});
@@ -272,4 +309,20 @@ fn headerValue(allocator: std.mem.Allocator, headers_block: []const u8, key_lowe
         }
     }
     return allocator.dupe(u8, "");
+}
+
+fn compileGuardInvokeRemote(client: *const ServiceClient, allocator: std.mem.Allocator) void {
+    const M = Method(i32, i32);
+    const method: M = undefined;
+    const request: M.Req = 123;
+    const ret = @TypeOf(client.invokeRemote(allocator, M, method, request, .{}));
+    if (ret != !RpcResult(M.Resp)) {
+        @compileError("ServiceClient.invokeRemote signature changed");
+    }
+}
+
+test "ServiceClient API invokeRemote compile guard" {
+    comptime {
+        _ = compileGuardInvokeRemote;
+    }
 }

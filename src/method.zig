@@ -4,6 +4,9 @@ const serializer = @import("serializer.zig");
 /// Signature of a SkirRPC method.
 pub fn Method(comptime Request: type, comptime Response: type) type {
     return struct {
+        pub const Req = Request;
+        pub const Resp = Response;
+
         /// The method name as declared in the .skir file.
         name: []const u8,
         /// The stable numeric identifier of the method.
