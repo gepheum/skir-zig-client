@@ -405,7 +405,7 @@ pub fn EnumAdapter(comptime T: type) type {
             }
 
             if (eol_indent != null) {
-                try out.appendSlice(allocator, "\"UNKNOWN\"");
+                try out.appendSlice(allocator, "\"unknown\"");
             } else {
                 try out.append(allocator, '0');
             }
@@ -414,14 +414,14 @@ pub fn EnumAdapter(comptime T: type) type {
         fn unknownToJson(self: *const Self, allocator: std.mem.Allocator, input: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             const u = self.get_unrecognized(input) orelse {
                 if (eol_indent != null) {
-                    try out.appendSlice(allocator, "\"UNKNOWN\"");
+                    try out.appendSlice(allocator, "\"unknown\"");
                 } else {
                     try out.append(allocator, '0');
                 }
                 return;
             };
             if (eol_indent != null) {
-                try out.appendSlice(allocator, "\"UNKNOWN\"");
+                try out.appendSlice(allocator, "\"unknown\"");
             } else {
                 if (u.from_wire) {
                     try out.append(allocator, '0');
