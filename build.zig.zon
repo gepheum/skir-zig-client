@@ -1,6 +1,6 @@
 .{
     .name = .skir_client,
-    .version = "0.1.1",
+    .version = "0.1.5",
     .fingerprint = 0x98eee72320d6ee06,
     .minimum_zig_version = "0.15.0",
     .paths = .{
