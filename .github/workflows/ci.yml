@@ -33,7 +33,7 @@ jobs:
               ;;
           esac
 
-            ZIG_URL="$(curl -fsSL "https://ziglang.org/download/index.json" | python3 -c 'import json,sys; version,target=sys.argv[1],sys.argv[2]; data=json.load(sys.stdin); entry=data.get(version, {}).get(target) or data.get("master", {}).get(target); print(entry["tarball"] if entry else "")' "$ZIG_VERSION" "$TARGET")"
+            ZIG_URL="$(curl -fsSL "https://ziglang.org/download/index.json" | python3 -c 'import json,sys; version,target=sys.argv[1],sys.argv[2]; data=json.load(sys.stdin); entry=data.get(version, {}).get(target); print(entry["tarball"] if entry else "")' "$ZIG_VERSION" "$TARGET")"
             if [ -z "$ZIG_URL" ]; then
             echo "No Zig binary found for target $TARGET" >&2
             exit 1
