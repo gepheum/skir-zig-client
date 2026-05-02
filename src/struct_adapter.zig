@@ -35,8 +35,8 @@ pub fn StructAdapter(comptime T: type) type {
         module_path: []const u8,
         qualified_name: []const u8,
         doc: []const u8,
-        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields(T),
-        set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields(T)) void,
+        get_unrecognized: *const fn (*const T) ?*const unrecognized.UnrecognizedFields(T),
+        set_unrecognized: *const fn (*T, ?*const unrecognized.UnrecognizedFields(T)) void,
 
         ordered_entries: std.ArrayList(FieldEntry),
         name_to_index: std.StringHashMap(usize),
@@ -50,8 +50,8 @@ pub fn StructAdapter(comptime T: type) type {
             module_path: []const u8,
             qualified_name: []const u8,
             doc: []const u8,
-            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields(T),
-            set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields(T)) void,
+            get_unrecognized: *const fn (*const T) ?*const unrecognized.UnrecognizedFields(T),
+            set_unrecognized: *const fn (*T, ?*const unrecognized.UnrecognizedFields(T)) void,
         ) !Self {
             return .{
                 .allocator = allocator,
@@ -459,11 +459,13 @@ pub fn StructAdapter(comptime T: type) type {
                         rendered[idx] = try std.json.Stringify.valueAlloc(allocator, value, .{});
                     }
 
-                    self.set_unrecognized(&t, .{
+                    const unrec = try allocator.create(unrecognized.UnrecognizedFields(T));
+                    unrec.* = .{
                         .dense_tail_json = rendered,
                         .dense_extra_count = extra.len,
                         .dense_tail_wire = null,
-                    });
+                    };
+                    self.set_unrecognized(&t, unrec);
                 }
                 n = recognized_count;
             }
@@ -580,11 +582,13 @@ pub fn StructAdapter(comptime T: type) type {
                         tail_wire[idx] = try allocator.dupe(u8, before[0..consumed]);
                     }
 
-                    self.set_unrecognized(&t, .{
+                    const unrec = try allocator.create(unrecognized.UnrecognizedFields(T));
+                    unrec.* = .{
                         .dense_tail_json = null,
                         .dense_extra_count = extra_count,
                         .dense_tail_wire = tail_wire,
-                    });
+                    };
+                    self.set_unrecognized(&t, unrec);
                 } else {
                     var j: usize = recognized_count;
                     while (j < encoded_slot_count) : (j += 1) {
@@ -603,7 +607,9 @@ pub fn StructAdapter(comptime T: type) type {
             }
 
             if (self.get_unrecognized(input)) |u| {
-                self.set_unrecognized(&out, try u.clone(allocator));
+                const unrec = try allocator.create(unrecognized.UnrecognizedFields(T));
+                unrec.* = try u.clone(allocator);
+                self.set_unrecognized(&out, unrec);
             }
 
             return out;
