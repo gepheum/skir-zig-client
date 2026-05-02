@@ -36,7 +36,7 @@ pub fn EnumAdapter(comptime T: type) type {
             wrap_from_json_fn: *const fn (*const anyopaque, std.mem.Allocator, std.json.Value, bool) anyerror!T,
             encode_value_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             wrap_decode_fn: *const fn (*const anyopaque, std.mem.Allocator, *[]const u8, bool) anyerror!T,
-            wrap_default_fn: *const fn (*const anyopaque) ?T,
+            wrap_default_fn: *const fn (*const anyopaque, std.mem.Allocator) ?T,
             variant_type_fn: ?*const fn () *const td.TypeDescriptor,
         };
 
@@ -142,7 +142,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     return error.ExpectedConstantVariant;
                 }
 
-                fn wrapDefault(ctx_ptr: *const anyopaque) ?T {
+                fn wrapDefault(ctx_ptr: *const anyopaque, _: std.mem.Allocator) ?T {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
                     return ctx.instance;
                 }
@@ -262,9 +262,9 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.wrap(inner);
                 }
 
-                fn wrapDefault(ctx_ptr: *const anyopaque) ?T {
+                fn wrapDefault(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator) ?T {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    const inner = ctx.ser._vtable.fromJsonFn(std.heap.page_allocator, .{ .null = {} }, false) catch return null;
+                    const inner = ctx.ser._vtable.fromJsonFn(allocator, .{ .integer = 0 }, false) catch return null;
                     return ctx.wrap(inner);
                 }
             };
@@ -458,9 +458,9 @@ pub fn EnumAdapter(comptime T: type) type {
 
         pub fn fromJson(self: *const Self, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
             return switch (json) {
-                .integer => |n| self.resolveConstantLookup(@intCast(n), keep_unrecognized, false),
-                .float => |f| self.resolveConstantLookup(@intFromFloat(@round(f)), keep_unrecognized, false),
-                .bool => |b| self.resolveConstantLookup(if (b) 1 else 0, keep_unrecognized, false),
+                .integer => |n| self.resolveConstantLookup(allocator, @intCast(n), keep_unrecognized, false),
+                .float => |f| self.resolveConstantLookup(allocator, @intFromFloat(@round(f)), keep_unrecognized, false),
+                .bool => |b| self.resolveConstantLookup(allocator, if (b) 1 else 0, keep_unrecognized, false),
                 .string => |str| blk: {
                     if (self.name_to_kind_ordinal.get(str)) |ko| {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
@@ -468,7 +468,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 if (entry.is_constant_fn(entry.ctx)) {
                                     break :blk entry.constant_fn(entry.ctx);
                                 }
-                                if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
+                                if (entry.wrap_default_fn(entry.ctx, allocator)) |v| break :blk v;
                             }
                         }
                     }
@@ -539,7 +539,7 @@ pub fn EnumAdapter(comptime T: type) type {
             return T.unknown;
         }
 
-        fn resolveConstantLookup(self: *const Self, number: i32, keep_unrecognized: bool, from_wire: bool) T {
+        fn resolveConstantLookup(self: *const Self, allocator: std.mem.Allocator, number: i32, keep_unrecognized: bool, from_wire: bool) T {
             if (self.number_to_entry.get(number)) |any| {
                 return switch (any) {
                     .removed => if (keep_unrecognized)
@@ -557,7 +557,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     .wrapper => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
-                                if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
+                                if (entry.wrap_default_fn(entry.ctx, allocator)) |v| break :blk v;
                                 if (keep_unrecognized) {
                                     break :blk self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire });
                                 }
@@ -721,7 +721,7 @@ pub fn EnumAdapter(comptime T: type) type {
 
             if (wire < 242) {
                 const n: i32 = @intCast(try decodeNumberBody(wire, input));
-                return self.resolveConstantLookup(n, keep_unrecognized, true);
+                return self.resolveConstantLookup(allocator, n, keep_unrecognized, true);
             }
 
             const wrapper_number: i32 = if (wire == 248)
