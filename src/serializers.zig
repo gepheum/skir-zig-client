@@ -1362,7 +1362,7 @@ test "encode lossy utf8" {
     defer out.deinit();
 
     try adapter.encode(alloc, "", &out);
-    try std.testing.expectEqualSlices(u8, &.{ 242 }, out.items);
+    try std.testing.expectEqualSlices(u8, &.{242}, out.items);
 
     // Encode valid UTF-8
     out.clearRetainingCapacity();
@@ -1406,7 +1406,6 @@ test "toJson lossy utf8" {
     try adapter.toJson(alloc, "a\xff\nb", null, &out);
     try std.testing.expectEqualStrings("\"a\xef\xbf\xbd\\nb\"", out.items);
 }
-
 
 test "boolSerializer: deserialize nonzero number is true" {
     const alloc = std.testing.allocator;
